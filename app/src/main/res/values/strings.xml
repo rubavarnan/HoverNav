@@ -1,0 +1,9 @@
+<resources>
+    <string name="app_name">HoverNav</string>
+    <string name="accessibility_service_name">HoverNav gesture control</string>
+    <string name="accessibility_service_description">Uses hand gestures detected by HoverNav to perform taps and swipes when tracking is running.</string>
+    <string name="tracking_notification_channel">Gesture tracking</string>
+    <string name="tracking_notification_title">HoverNav is tracking</string>
+    <string name="tracking_notification_text">Hand tracking is active. Tap Stop to end the camera session.</string>
+    <string name="tracking_notification_stop">Stop</string>
+</resources>
