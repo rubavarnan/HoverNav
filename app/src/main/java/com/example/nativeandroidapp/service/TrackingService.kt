@@ -50,6 +50,7 @@ import com.example.nativeandroidapp.tracking.ScreenPoint
 import com.example.nativeandroidapp.tracking.SwipeDirection
 import com.example.nativeandroidapp.tracking.TrackingStatus
 import com.example.nativeandroidapp.tracking.TrackingStatusStore
+import com.example.nativeandroidapp.tracking.TrackingPreferences
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import kotlin.math.max
@@ -79,9 +80,9 @@ class TrackingService : LifecycleService() {
     }
     if (isRunning) return START_NOT_STICKY
 
-    if (!hasCameraPermission() || !Settings.canDrawOverlays(this)) {
-      Log.e(TAG, "Cannot start tracking: camera and overlay permissions are required")
-      TrackingStatusStore.update(TrackingStatus.Failed("Camera and overlay permissions are required."))
+    if (!hasCameraPermission()) {
+      Log.e(TAG, "Cannot start tracking: camera permission is required")
+      TrackingStatusStore.update(TrackingStatus.Failed("Camera permission is required."))
       stopSelf()
       return START_NOT_STICKY
     }
@@ -89,7 +90,7 @@ class TrackingService : LifecycleService() {
     try {
       TrackingStatusStore.update(TrackingStatus.Starting)
       startTrackingForeground()
-      createCursorOverlay()
+      syncOverlays()
       createHandLandmarker()
       bindCamera()
       isRunning = true
@@ -235,7 +236,7 @@ class TrackingService : LifecycleService() {
             interpreter.reset()
             GestureBus.publish(GestureEvent.HandLost)
           } else {
-            val landmarks = hand.map { HandLandmark(it.x(), it.y()) }
+            val landmarks = hand.map { HandLandmark(it.x(), it.y(), it.z()) }
             screenSize().let { (width, height) ->
               interpreter.process(landmarks, width, height).forEach(GestureBus::publish)
             }
@@ -265,13 +266,23 @@ class TrackingService : LifecycleService() {
     }
   }
 
-  private fun createCursorOverlay() {
-    cursorOverlay = CursorOverlay(this)
-    gesturePaletteOverlay = GesturePaletteOverlay(this)
+  private fun syncOverlays() {
+    val showHandGesture = getSharedPreferences(TrackingPreferences.PREFERENCES_NAME, MODE_PRIVATE)
+      .getBoolean(TrackingPreferences.SHOW_HAND_GESTURE_KEY, false)
+    if (showHandGesture && Settings.canDrawOverlays(this)) {
+      if (cursorOverlay == null) cursorOverlay = CursorOverlay(this)
+      if (gesturePaletteOverlay == null) gesturePaletteOverlay = GesturePaletteOverlay(this)
+    } else {
+      cursorOverlay?.remove()
+      cursorOverlay = null
+      gesturePaletteOverlay?.remove()
+      gesturePaletteOverlay = null
+    }
   }
 
   private val overlayListener: (GestureEvent) -> Unit = { event ->
     mainHandler.post {
+      syncOverlays()
       when (event) {
         is GestureEvent.PointerMoved -> {
           cursorOverlay?.moveTo(event.point)

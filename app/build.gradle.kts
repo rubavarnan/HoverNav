@@ -4,19 +4,34 @@ plugins {
   alias(libs.plugins.kotlin.serialization)
 }
 
+val uploadStoreFile = providers.gradleProperty("hovernavUploadStoreFile").orNull
+
 android {
     namespace = "com.example.nativeandroidapp"
     compileSdk = 36
     defaultConfig {
-        applicationId = "com.example.nativeandroidapp"
+        applicationId = "com.varana.HoverNav"
         minSdk = 24
         targetSdk = 36
         versionCode = 1
-        versionName = "1.0"
+        versionName = "3.0"
     }
 
+    if (uploadStoreFile != null) {
+        signingConfigs {
+            create("release") {
+                storeFile = file(uploadStoreFile)
+                storePassword = providers.gradleProperty("hovernavUploadStorePassword").get()
+                keyAlias = providers.gradleProperty("hovernavUploadKeyAlias").get()
+                keyPassword = providers.gradleProperty("hovernavUploadKeyPassword").get()
+            }
+        }
+    }
     buildTypes {
         release {
+            if (uploadStoreFile != null) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
