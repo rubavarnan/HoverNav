@@ -39,6 +39,23 @@ class HandGestureInterpreterTest {
   }
 
   @Test
+  fun bentFingerIsRecognizedWhenPointingSideways() {
+    val landmarks = handWithBentFinger(8).toMutableList()
+    val mcp = landmarks[5]
+    val pip = landmarks[6]
+    val tip = landmarks[8]
+    landmarks[6] = rotateAround(mcp, pip)
+    landmarks[8] = rotateAround(mcp, tip)
+
+    val events = HandGestureInterpreter().process(landmarks, 1000, 1000)
+
+    assertEquals(
+      SwipeDirection.UP,
+      events.filterIsInstance<GestureEvent.Scroll>().single().direction,
+    )
+  }
+
+  @Test
   fun scrollEmitsOnceUntilFingerStraightens() {
     val interpreter = HandGestureInterpreter()
 
@@ -68,6 +85,17 @@ class HandGestureInterpreterTest {
   }
 
   @Test
+  fun multipleCurledFingersDoNotGuessAScrollDirection() {
+    val landmarks = handWithBentFinger(8).toMutableList().apply {
+      this[12] = bendTip(this[9], this[10])
+    }
+
+    val events = HandGestureInterpreter().process(landmarks, 1000, 1000)
+
+    assertEquals(0, events.count { it is GestureEvent.Scroll })
+  }
+
+  @Test
   fun lostHandResetsPinchState() {
     val interpreter = HandGestureInterpreter()
     interpreter.process(handWithBentFinger(null), 1000, 1000)
@@ -82,12 +110,39 @@ class HandGestureInterpreterTest {
   }
 
   private fun handWithBentFinger(bentTipIndex: Int?): List<HandLandmark> =
-    List(21) { HandLandmark(0.5f, 0.35f) }.toMutableList().apply {
-      this[4] = HandLandmark(0.1f, 0.5f)
-      this[8] = HandLandmark(0.6f, 0.35f)
-      listOf(6, 10, 14, 18).forEach { this[it] = HandLandmark(0.5f, 0.45f) }
+    List(21) { HandLandmark(0.5f, 0.5f) }.toMutableList().apply {
+      this[0] = HandLandmark(0.5f, 0.9f)
+      this[4] = HandLandmark(0.15f, 0.6f)
+
+      this[5] = HandLandmark(0.4f, 0.6f)
+      this[6] = HandLandmark(0.39f, 0.45f)
+      this[8] = HandLandmark(0.38f, 0.3f)
+
+      this[9] = HandLandmark(0.48f, 0.58f)
+      this[10] = HandLandmark(0.48f, 0.42f)
+      this[12] = HandLandmark(0.48f, 0.26f)
+
+      this[13] = HandLandmark(0.56f, 0.6f)
+      this[14] = HandLandmark(0.58f, 0.45f)
+      this[16] = HandLandmark(0.6f, 0.3f)
+
+      this[17] = HandLandmark(0.64f, 0.62f)
+      this[18] = HandLandmark(0.68f, 0.48f)
+      this[20] = HandLandmark(0.72f, 0.34f)
       if (bentTipIndex != null) {
-        this[bentTipIndex] = HandLandmark(0.5f, 0.55f)
+        val pipIndex = bentTipIndex - 2
+        val mcpIndex = bentTipIndex - 3
+        this[bentTipIndex] = bendTip(this[mcpIndex], this[pipIndex])
       }
     }
+
+  private fun bendTip(mcp: HandLandmark, pip: HandLandmark) =
+    HandLandmark(pip.x - (pip.x - mcp.x), pip.y - (pip.y - mcp.y), pip.z - (pip.z - mcp.z))
+
+  private fun rotateAround(origin: HandLandmark, point: HandLandmark) =
+    HandLandmark(
+      origin.x - (point.y - origin.y),
+      origin.y + (point.x - origin.x),
+      point.z,
+    )
 }

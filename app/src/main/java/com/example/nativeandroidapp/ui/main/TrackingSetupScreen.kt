@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
@@ -27,6 +28,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.Role
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -52,6 +54,7 @@ import com.example.nativeandroidapp.service.TrackingService
 import com.example.nativeandroidapp.tracking.TrackingStatus
 import com.example.nativeandroidapp.tracking.TrackingStatusStore
 import com.example.nativeandroidapp.tracking.SwipeDirection
+import com.example.nativeandroidapp.tracking.TrackingPreferences
 
 @Composable
 fun TrackingSetupScreen(
@@ -66,6 +69,12 @@ fun TrackingSetupScreen(
   val context = LocalContext.current
   val trackingStatus by TrackingStatusStore.status.collectAsStateWithLifecycle()
   var gestureExamplesExpanded by rememberSaveable { mutableStateOf(false) }
+  val preferences = remember(context) {
+    context.getSharedPreferences(TrackingPreferences.PREFERENCES_NAME, Context.MODE_PRIVATE)
+  }
+  var showHandGesture by remember {
+    mutableStateOf(preferences.getBoolean(TrackingPreferences.SHOW_HAND_GESTURE_KEY, false))
+  }
   var permissionRefresh by remember { mutableIntStateOf(0) }
   LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { permissionRefresh++ }
 
@@ -78,7 +87,8 @@ fun TrackingSetupScreen(
     Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
       ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
   }
-  val allAccessGranted = cameraGranted && overlayGranted && accessibilityEnabled && notificationsGranted
+  val requiredAccessGranted = cameraGranted && accessibilityEnabled && notificationsGranted
+  val allAccessGranted = requiredAccessGranted && (!showHandGesture || overlayGranted)
 
   Column(
     modifier = modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
@@ -93,27 +103,51 @@ fun TrackingSetupScreen(
       expanded = gestureExamplesExpanded,
       onToggle = { gestureExamplesExpanded = !gestureExamplesExpanded },
     )
-    if (!allAccessGranted) {
+    if (!requiredAccessGranted) {
       Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+          Text("Access", style = MaterialTheme.typography.titleMedium)
           PermissionRow("Camera permission", cameraGranted, onRequestCamera)
-          Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            PermissionRow("Display over other apps", overlayGranted, onOpenOverlaySettings)
-            if (!overlayGranted) {
-              Text(
-                "On some devices, if this switch is blocked, open Settings > Apps > App management > HoverNav > tap the three-dot menu > Allow restricted settings. Then return here and enable Display over other apps.",
-                style = MaterialTheme.typography.bodySmall,
-              )
-            }
-          }
           PermissionRow("Gesture accessibility service", accessibilityEnabled, onOpenAccessibilitySettings)
-          if (!accessibilityEnabled) {
+          PermissionRow("Tracking notification", notificationsGranted, onRequestNotifications)
+        }
+      }
+    }
+    Card(modifier = Modifier.fillMaxWidth()) {
+      Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text("Hand gesture", style = MaterialTheme.typography.titleMedium)
+        Row(
+          modifier = Modifier
+            .fillMaxWidth()
+            .toggleable(
+              value = showHandGesture,
+              role = Role.Checkbox,
+              onValueChange = { checked ->
+                showHandGesture = checked
+                preferences.edit()
+                  .putBoolean(TrackingPreferences.SHOW_HAND_GESTURE_KEY, checked)
+                  .apply()
+                if (!checked && overlayGranted) onOpenOverlaySettings()
+              },
+            ),
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          Text("Show hand gesture", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+          Checkbox(
+            checked = showHandGesture,
+            onCheckedChange = null,
+          )
+        }
+        if (showHandGesture) {
+          if (overlayGranted) {
             Text(
-              "In Accessibility settings, open Downloaded apps > Spatial Touch gesture control, then enable the service.",
+              "Turning this off opens Android settings so you can also turn off this app's overlay access.",
               style = MaterialTheme.typography.bodySmall,
             )
           }
-          PermissionRow("Tracking notification", notificationsGranted, onRequestNotifications)
+          Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            PermissionRow("Allow over other apps", overlayGranted, onOpenOverlaySettings)
+          }
         }
       }
     }

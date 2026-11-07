@@ -1,9 +1,8 @@
 package com.example.nativeandroidapp.tracking
 
-import kotlin.math.abs
 import kotlin.math.hypot
 
-data class HandLandmark(val x: Float, val y: Float)
+data class HandLandmark(val x: Float, val y: Float, val z: Float = 0f)
 
 class HandGestureInterpreter {
   private var isPinching = false
@@ -32,9 +31,19 @@ class HandGestureInterpreter {
     if (isPinching && pinchRatio <= PINCH_END_RATIO) return events
     isPinching = false
 
-    val bentFinger = Finger.entries.firstOrNull { finger ->
-      landmarks[finger.tip].y - landmarks[finger.pip].y > FINGER_BEND_THRESHOLD
-    }
+    val bentFinger = activeBentFinger
+      ?.takeIf { bendCosine(landmarks, it) < BEND_RELEASE_COSINE }
+      ?: Finger.entries
+        .map { finger -> finger to bendCosine(landmarks, finger) }
+        .filter { (_, cosine) -> cosine < BEND_START_COSINE }
+        .sortedBy { (_, cosine) -> cosine }
+        .let { candidates ->
+          val strongest = candidates.firstOrNull()
+          val nextStrongest = candidates.getOrNull(1)
+          if (strongest != null &&
+            (nextStrongest == null || nextStrongest.second - strongest.second >= BEND_DOMINANCE_MARGIN)
+          ) strongest.first else null
+        }
     if (bentFinger != activeBentFinger) {
       activeBentFinger = bentFinger
       bentFinger?.let { events += GestureEvent.Scroll(it.direction) }
@@ -58,6 +67,18 @@ class HandGestureInterpreter {
     return distance(thumbTip, indexTip) / palmScale
   }
 
+  private fun bendCosine(landmarks: List<HandLandmark>, finger: Finger): Float {
+    val mcp = landmarks[finger.mcp]
+    val pip = landmarks[finger.pip]
+    val tip = landmarks[finger.tip]
+    val proximal = pip - mcp
+    val distal = tip - pip
+    val proximalLength = vectorLength(proximal)
+    val distalLength = vectorLength(distal)
+    if (proximalLength < MIN_FINGER_SEGMENT_LENGTH || distalLength < MIN_FINGER_SEGMENT_LENGTH) return 1f
+    return dot(proximal, distal) / (proximalLength * distalLength)
+  }
+
   private fun smoothPointer(indexTip: HandLandmark, width: Int, height: Int): ScreenPoint {
     val nextX = 1f - indexTip.x
     val nextY = indexTip.y
@@ -72,13 +93,24 @@ class HandGestureInterpreter {
   }
 
   private fun distance(first: HandLandmark, second: HandLandmark): Float =
-    hypot(first.x - second.x, first.y - second.y)
+    hypot(hypot(first.x - second.x, first.y - second.y), first.z - second.z)
 
-  private enum class Finger(val tip: Int, val pip: Int, val direction: SwipeDirection) {
-    INDEX(INDEX_FINGER_TIP, 6, SwipeDirection.UP),
-    MIDDLE(12, 10, SwipeDirection.DOWN),
-    RING(16, 14, SwipeDirection.RIGHT),
-    LITTLE(20, 18, SwipeDirection.LEFT),
+  private data class Vector3(val x: Float, val y: Float, val z: Float)
+
+  private operator fun HandLandmark.minus(other: HandLandmark) =
+    Vector3(x - other.x, y - other.y, z - other.z)
+
+  private fun vectorLength(vector: Vector3): Float =
+    hypot(hypot(vector.x, vector.y), vector.z)
+
+  private fun dot(first: Vector3, second: Vector3): Float =
+    first.x * second.x + first.y * second.y + first.z * second.z
+
+  private enum class Finger(val mcp: Int, val pip: Int, val tip: Int, val direction: SwipeDirection) {
+    INDEX(5, 6, INDEX_FINGER_TIP, SwipeDirection.UP),
+    MIDDLE(9, 10, 12, SwipeDirection.DOWN),
+    RING(13, 14, 16, SwipeDirection.RIGHT),
+    LITTLE(17, 18, 20, SwipeDirection.LEFT),
   }
 
   private companion object {
@@ -92,7 +124,10 @@ class HandGestureInterpreter {
     const val MIN_PALM_SCALE = 0.08f
     const val PINCH_START_RATIO = 0.3f
     const val PINCH_END_RATIO = 0.43f
-    const val FINGER_BEND_THRESHOLD = 0.035f
+    const val BEND_START_COSINE = 0.65f
+    const val BEND_RELEASE_COSINE = 0.8f
+    const val BEND_DOMINANCE_MARGIN = 0.15f
+    const val MIN_FINGER_SEGMENT_LENGTH = 0.005f
     const val POINTER_SMOOTHING = 0.4f
   }
 }
