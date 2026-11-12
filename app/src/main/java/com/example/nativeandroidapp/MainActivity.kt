@@ -32,6 +32,17 @@ class MainActivity : ComponentActivity() {
               notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
             }
           },
+          onOpenCameraSettings = { openAppSettings() },
+          onOpenNotificationSettings = {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+              startActivity(
+                Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                  .putExtra(Settings.EXTRA_APP_PACKAGE, packageName),
+              )
+            } else {
+              openAppSettings()
+            }
+          },
           onOpenOverlaySettings = {
             startActivity(
               Intent(
@@ -57,5 +68,14 @@ class MainActivity : ComponentActivity() {
         )
       }
     }
+  }
+
+  private fun openAppSettings() {
+    startActivity(
+      Intent(
+        Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+        Uri.parse("package:$packageName"),
+      ),
+    )
   }
 }

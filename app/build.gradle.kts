@@ -13,8 +13,8 @@ android {
         applicationId = "com.varana.HoverNav"
         minSdk = 24
         targetSdk = 36
-        versionCode = 1
-        versionName = "3.0"
+        versionCode = 6
+        versionName = "6.0"
     }
 
     if (uploadStoreFile != null) {
