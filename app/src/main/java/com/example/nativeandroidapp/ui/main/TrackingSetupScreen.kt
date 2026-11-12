@@ -6,30 +6,32 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.provider.Settings
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.selection.toggleable
-import androidx.compose.material3.Button
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
-import androidx.compose.material3.Checkbox
-import androidx.compose.material3.CheckboxDefaults
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.semantics.Role
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -38,12 +40,16 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
@@ -60,6 +66,8 @@ import com.example.nativeandroidapp.tracking.TrackingPreferences
 fun TrackingSetupScreen(
   onRequestCamera: () -> Unit,
   onRequestNotifications: () -> Unit,
+  onOpenCameraSettings: () -> Unit,
+  onOpenNotificationSettings: () -> Unit,
   onOpenOverlaySettings: () -> Unit,
   onOpenAccessibilitySettings: () -> Unit,
   onStartTracking: () -> Unit,
@@ -68,6 +76,7 @@ fun TrackingSetupScreen(
 ) {
   val context = LocalContext.current
   val trackingStatus by TrackingStatusStore.status.collectAsStateWithLifecycle()
+  val currentTrackingStatus = trackingStatus
   var gestureExamplesExpanded by rememberSaveable { mutableStateOf(false) }
   val preferences = remember(context) {
     context.getSharedPreferences(TrackingPreferences.PREFERENCES_NAME, Context.MODE_PRIVATE)
@@ -89,108 +98,194 @@ fun TrackingSetupScreen(
   }
   val requiredAccessGranted = cameraGranted && accessibilityEnabled && notificationsGranted
   val allAccessGranted = requiredAccessGranted && (!showHandGesture || overlayGranted)
+  val permissionsEnabled = listOf(cameraGranted, accessibilityEnabled, notificationsGranted, overlayGranted).count { it }
+  var accessExpanded by rememberSaveable { mutableStateOf(permissionsEnabled < 4) }
+  LaunchedEffect(permissionsEnabled) {
+    if (permissionsEnabled == 4) accessExpanded = false
+  }
 
-  Column(
-    modifier = modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
-    verticalArrangement = Arrangement.spacedBy(16.dp),
-  ) {
-    Text("HoverNav", style = MaterialTheme.typography.headlineMedium)
-    Text(
-      "Control your screen with front-camera hand gestures. Camera frames and landmark detection stay on this device.",
-      style = MaterialTheme.typography.bodyLarge,
-    )
-    GestureExamples(
-      expanded = gestureExamplesExpanded,
-      onToggle = { gestureExamplesExpanded = !gestureExamplesExpanded },
-    )
-    if (!requiredAccessGranted) {
-      Card(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-          Text("Access", style = MaterialTheme.typography.titleMedium)
-          PermissionRow("Camera permission", cameraGranted, onRequestCamera)
-          PermissionRow("Gesture accessibility service", accessibilityEnabled, onOpenAccessibilitySettings)
-          PermissionRow("Tracking notification", notificationsGranted, onRequestNotifications)
-        }
-      }
-    }
-    Card(modifier = Modifier.fillMaxWidth()) {
-      Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("Hand gesture", style = MaterialTheme.typography.titleMedium)
-        Row(
-          modifier = Modifier
-            .fillMaxWidth()
-            .toggleable(
-              value = showHandGesture,
-              role = Role.Checkbox,
-              onValueChange = { checked ->
-                showHandGesture = checked
-                preferences.edit()
-                  .putBoolean(TrackingPreferences.SHOW_HAND_GESTURE_KEY, checked)
-                  .apply()
-                if (!checked && overlayGranted) onOpenOverlaySettings()
-              },
-            ),
-          verticalAlignment = Alignment.CenterVertically,
+  val trackingActionLabel = when (currentTrackingStatus) {
+    TrackingStatus.Idle -> "Start hand tracking"
+    TrackingStatus.Starting -> "Starting hand tracking…"
+    TrackingStatus.Running -> "Stop hand tracking"
+    is TrackingStatus.Failed -> "Retry hand tracking"
+  }
+  val trackingActionMessage = when (currentTrackingStatus) {
+    TrackingStatus.Idle -> if (allAccessGranted) null else "Enable required permissions to start."
+    TrackingStatus.Starting -> "Opening the front camera…"
+    TrackingStatus.Running -> "Hand tracking is running."
+    is TrackingStatus.Failed -> currentTrackingStatus.message
+  }
+  val trackingActionEnabled = when (currentTrackingStatus) {
+    TrackingStatus.Idle, is TrackingStatus.Failed -> allAccessGranted
+    TrackingStatus.Starting -> false
+    TrackingStatus.Running -> true
+  }
+  val trackingActionShape = RoundedCornerShape(24.dp)
+  val trackingActionColors = when {
+    !trackingActionEnabled -> listOf(Color(0xFF667085), Color(0xFF475467))
+    currentTrackingStatus == TrackingStatus.Running -> listOf(Color(0xFFFF7043), Color(0xFFD81B60))
+    else -> listOf(Color(0xFF00A896), Color(0xFF2962FF))
+  }
+  val trackingActionTextColor = if (trackingActionEnabled) Color.White else Color(0xFFE4E7EC)
+
+  Surface(modifier = modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+    Box(modifier = Modifier.fillMaxSize().navigationBarsPadding()) {
+      Column(
+        modifier = Modifier
+          .fillMaxSize()
+          .verticalScroll(rememberScrollState())
+          .padding(start = 20.dp, top = 20.dp, end = 20.dp, bottom = 100.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+      ) {
+      Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.primary,
+        shape = MaterialTheme.shapes.extraLarge,
+        contentColor = MaterialTheme.colorScheme.onPrimary,
+      ) {
+        Column(
+          modifier = Modifier.padding(horizontal = 20.dp, vertical = 14.dp),
+          verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-          Text("Show hand gesture", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
-          Checkbox(
-            checked = showHandGesture,
-            onCheckedChange = null,
+          Text("HoverNav - Gesture Control", style = MaterialTheme.typography.headlineMedium)
+          Text(
+            "Navigate your screen with simple hand movements. Camera frames and landmark detection stay on this device.",
+            style = MaterialTheme.typography.bodyMedium,
           )
         }
-        if (showHandGesture) {
-          if (overlayGranted) {
-            Text(
-              "Turning this off opens Android settings so you can also turn off this app's overlay access.",
-              style = MaterialTheme.typography.bodySmall,
-            )
+      }
+      Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+      ) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+          TextButton(onClick = { accessExpanded = !accessExpanded }, modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+              Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+              ) {
+                Text("Required permissions", style = MaterialTheme.typography.titleMedium)
+                Text(if (accessExpanded) "Hide ▲" else "Show ▼", style = MaterialTheme.typography.labelLarge)
+              }
+              Text(
+                "$permissionsEnabled of 4 permissions enabled",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+              )
+            }
           }
-          Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+          if (accessExpanded) {
+            PermissionRow(
+              "Camera permission",
+              cameraGranted,
+              if (cameraGranted) onOpenCameraSettings else onRequestCamera,
+            )
+            PermissionRow("Gesture accessibility service", accessibilityEnabled, onOpenAccessibilitySettings)
+            PermissionRow(
+              "Tracking notification",
+              notificationsGranted,
+              if (notificationsGranted) onOpenNotificationSettings else onRequestNotifications,
+            )
             PermissionRow("Allow over other apps", overlayGranted, onOpenOverlaySettings)
           }
         }
       }
-    }
-    when (val status = trackingStatus) {
-      TrackingStatus.Idle -> Text("Tracking is stopped.", style = MaterialTheme.typography.bodyMedium)
-      TrackingStatus.Starting -> Text("Starting hand tracking and opening the front camera…", style = MaterialTheme.typography.bodyMedium)
-      TrackingStatus.Running -> Text("Hand tracking is running. The camera notification should be visible.", style = MaterialTheme.typography.bodyMedium)
-      is TrackingStatus.Failed -> Text(
-        "Could not start tracking: ${status.message}",
-        color = MaterialTheme.colorScheme.error,
-        style = MaterialTheme.typography.bodyMedium,
+      Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+      ) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+          Text("Gesture overlay", style = MaterialTheme.typography.titleMedium)
+          Text(
+            "Choose whether the detected hand stays visible on top of other apps.",
+            style = MaterialTheme.typography.bodySmall,
+          )
+          Row(
+            modifier = Modifier
+              .fillMaxWidth()
+              .toggleable(
+                value = showHandGesture,
+                role = Role.Switch,
+                onValueChange = { checked ->
+                  showHandGesture = checked
+                  preferences.edit()
+                    .putBoolean(TrackingPreferences.SHOW_HAND_GESTURE_KEY, checked)
+                    .apply()
+                },
+              )
+              .padding(vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+          ) {
+            Text("Show hand gesture", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+            Switch(checked = showHandGesture, onCheckedChange = null)
+          }
+        }
+      }
+      GestureExamples(
+        expanded = gestureExamplesExpanded,
+        onToggle = { gestureExamplesExpanded = !gestureExamplesExpanded },
       )
+      Text(
+        "Tracking uses a foreground camera notification. Keep this app open when starting; Android may block starting camera access from the background.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+      )
+      }
+      Column(
+        modifier = Modifier
+          .align(Alignment.BottomEnd)
+          .padding(20.dp)
+          .shadow(12.dp, trackingActionShape)
+          .clip(trackingActionShape)
+          .background(Brush.linearGradient(trackingActionColors))
+          .border(1.dp, Color.White.copy(alpha = 0.32f), trackingActionShape)
+          .clickable(enabled = trackingActionEnabled) {
+            when (currentTrackingStatus) {
+              TrackingStatus.Running -> onStopTracking()
+              TrackingStatus.Starting -> Unit
+              TrackingStatus.Idle, is TrackingStatus.Failed -> onStartTracking()
+            }
+          }
+          .widthIn(min = 190.dp, max = 280.dp)
+          .padding(horizontal = 22.dp, vertical = 14.dp),
+        verticalArrangement = Arrangement.spacedBy(3.dp),
+      ) {
+        Text(trackingActionLabel, style = MaterialTheme.typography.titleSmall, color = trackingActionTextColor)
+        trackingActionMessage?.let {
+          Text(
+            it,
+            style = MaterialTheme.typography.labelSmall,
+            color = trackingActionTextColor.copy(alpha = 0.88f),
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+          )
+        }
+      }
     }
-    Spacer(modifier = Modifier.height(4.dp))
-    Button(
-      onClick = onStartTracking,
-      enabled = allAccessGranted,
-      modifier = Modifier.fillMaxWidth(),
-    ) {
-      Text("Start hand tracking")
-    }
-    OutlinedButton(onClick = onStopTracking, modifier = Modifier.fillMaxWidth()) {
-      Text("Stop hand tracking")
-    }
-    Text(
-      "Tracking uses a foreground camera notification. Keep this app open when starting; Android may block starting camera access from the background.",
-      style = MaterialTheme.typography.bodySmall,
-    )
   }
 }
 
 @Composable
 private fun GestureExamples(expanded: Boolean, onToggle: () -> Unit) {
-  Card(modifier = Modifier.fillMaxWidth()) {
+  Card(
+    modifier = Modifier.fillMaxWidth(),
+    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
+  ) {
     Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
       TextButton(onClick = onToggle, modifier = Modifier.fillMaxWidth()) {
-        Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.SpaceBetween,
-          verticalAlignment = Alignment.CenterVertically,
-        ) {
-          Text("Gesture examples", style = MaterialTheme.typography.titleMedium)
-          Text(if (expanded) "Hide ▲" else "Show ▼", style = MaterialTheme.typography.labelLarge)
+        Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+          ) {
+            Text("Gesture examples", style = MaterialTheme.typography.titleMedium)
+            Text(if (expanded) "Hide ▲" else "Show ▼", style = MaterialTheme.typography.labelLarge)
+          }
+          Text("Quick guide to taps and directional scrolling", style = MaterialTheme.typography.bodySmall)
         }
       }
       if (expanded) {
@@ -325,7 +420,7 @@ private fun PermissionRow(label: String, granted: Boolean, onRequest: () -> Unit
     Row(
       modifier = Modifier
         .fillMaxWidth()
-        .clickable(enabled = !granted, onClick = onRequest)
+        .clickable(onClick = onRequest)
         .padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
       horizontalArrangement = Arrangement.SpaceBetween,
       verticalAlignment = Alignment.CenterVertically,
@@ -333,22 +428,15 @@ private fun PermissionRow(label: String, granted: Boolean, onRequest: () -> Unit
       Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
         Text(label, style = MaterialTheme.typography.titleSmall)
         Text(
-          if (granted) "Enabled" else "Tap to enable",
+          if (granted) "Enabled · tap to manage" else "Tap to enable",
           style = MaterialTheme.typography.bodySmall,
           color = if (granted) MaterialTheme.colorScheme.primary
             else MaterialTheme.colorScheme.onSurfaceVariant,
         )
       }
-      Checkbox(
+      Switch(
         checked = granted,
-        onCheckedChange = { checked ->
-          if (checked && !granted) onRequest()
-        },
-        colors = CheckboxDefaults.colors(
-          checkedColor = MaterialTheme.colorScheme.primary,
-          uncheckedColor = MaterialTheme.colorScheme.outline,
-          checkmarkColor = MaterialTheme.colorScheme.onPrimary,
-        ),
+        onCheckedChange = null,
       )
     }
   }
